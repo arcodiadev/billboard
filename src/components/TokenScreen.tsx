@@ -8,11 +8,14 @@ interface TokenScreenProps {
   initialHub: string;
   busy: boolean;
   error: string | null;
+  /** A hub address or token is saved in this browser. */
+  hasSaved: boolean;
   onConnect(hub: string, token: string): void;
   onDemo(): void;
+  onForget(): void;
 }
 
-export function TokenScreen({ initialHub, busy, error, onConnect, onDemo }: TokenScreenProps): ReactNode {
+export function TokenScreen({ initialHub, busy, error, hasSaved, onConnect, onDemo, onForget }: TokenScreenProps): ReactNode {
   const [hub, setHub] = useState(initialHub);
   const [token, setToken] = useState('');
 
@@ -59,6 +62,11 @@ export function TokenScreen({ initialHub, busy, error, onConnect, onDemo }: Toke
         <button className="connect" type="submit" disabled={busy}>
           {busy ? 'Connecting…' : 'Connect'}
         </button>
+        {hasSaved && (
+          <button className="forget" type="button" onClick={onForget}>
+            Forget saved hub and token
+          </button>
+        )}
         <a
           className="demo-link"
           href="?demo=1"

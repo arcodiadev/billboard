@@ -198,6 +198,12 @@ export function App(): ReactNode {
     window.history.replaceState(null, '', window.location.pathname + (q ? `?${q}` : ''));
   }
 
+  function forgetSaved(): void {
+    window.localStorage.removeItem(LS_HUB);
+    window.localStorage.removeItem(LS_TOKEN);
+    setConnectError(null);
+  }
+
   function disconnect(): void {
     streamRef.current?.close();
     streamRef.current = null;
@@ -209,6 +215,7 @@ export function App(): ReactNode {
   }
 
   const connected = board !== null;
+  const hasSaved = window.localStorage.getItem(LS_HUB) !== null || window.localStorage.getItem(LS_TOKEN) !== null;
   const wallActive = wall && connected;
   const displayNow = freeze && connected && board.demo ? Date.parse(board.snapshot.generated_at) : now;
 
@@ -241,8 +248,10 @@ export function App(): ReactNode {
               initialHub={hubParam ?? window.localStorage.getItem(LS_HUB) ?? DEFAULT_HUB}
               busy={busy}
               error={connectError}
+              hasSaved={hasSaved}
               onConnect={(hub, token) => void connect(hub, token, true)}
               onDemo={() => void startDemo()}
+              onForget={forgetSaved}
             />
           ) : (
             <>

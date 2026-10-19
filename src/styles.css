@@ -195,6 +195,10 @@ button { font: inherit; color: inherit; }
   font-weight: 700; padding: 0.6rem 1rem; cursor: pointer;
 }
 .token-card .connect:disabled { opacity: 0.6; cursor: default; }
+.token-card .forget {
+  border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--fg);
+  font: inherit; font-size: 0.86rem; padding: 0.5rem 0.9rem; cursor: pointer; align-self: flex-start;
+}
 .token-card .demo-link { color: var(--accent); font-size: 0.86rem; text-decoration: none; }
 .token-card .demo-link:hover { text-decoration: underline; }
 .token-card .hub-local {
