@@ -356,3 +356,33 @@ describe('saved hub reset rules', () => {
     expect(screen.getByLabelText('Hub address')).toHaveValue('https://hub.lectrical.dev');
   });
 });
+
+describe('forget saved hub and token', () => {
+  beforeEach(() => {
+    window.history.replaceState(null, '', '/');
+    window.localStorage.clear();
+  });
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it('is absent when nothing is saved', async () => {
+    render(<App />);
+    await screen.findByRole('heading', { name: 'Connect Billboard to Lectrical' });
+    expect(screen.queryByRole('button', { name: 'Forget saved hub and token' })).not.toBeInTheDocument();
+  });
+
+  it('shows on the connect screen when a saved value exists, and clears it', async () => {
+    window.localStorage.setItem('billboard.hub', 'https://old-hub.example.net');
+    window.localStorage.setItem('billboard.token', 'lck_test_123');
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'));
+    render(<App />);
+    await screen.findByRole('alert');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Forget saved hub and token' }));
+    expect(window.localStorage.getItem('billboard.hub')).toBeNull();
+    expect(window.localStorage.getItem('billboard.token')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Forget saved hub and token' })).not.toBeInTheDocument();
+  });
+});
