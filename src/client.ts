@@ -41,7 +41,7 @@ export class HubClient implements BoardClient {
   constructor(hub: string, token: string, opts: HubClientOptions = {}) {
     this.hub = hub.replace(/\/+$/, '');
     this.token = token;
-    this.fetchFn = opts.fetchFn ?? fetch;
+    this.fetchFn = opts.fetchFn ?? ((input, init) => fetch(input, init));
     this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
     this.random = opts.random ?? Math.random;
   }

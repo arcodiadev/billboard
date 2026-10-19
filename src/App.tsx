@@ -129,20 +129,25 @@ export function App(): ReactNode {
         setConnectError(check.error);
         return;
       }
-      if (!token.trim()) {
+      const cleanToken = token.replace(/\s/g, '');
+      if (!cleanToken) {
         setConnectError('Paste your token first. Create a read-only one with: lectrical token create billboard --team <team> --role read');
+        return;
+      }
+      if (!/^[\x21-\x7e]+$/.test(cleanToken)) {
+        setConnectError("That token has characters a header can't carry.");
         return;
       }
       setBusy(true);
       setConnectError(null);
       try {
-        const client = new HubClient(check.url, token.trim());
+        const client = new HubClient(check.url, cleanToken);
         streamRef.current?.close();
         const snapshot = await startWith(client, false);
         if (snapshot.view === 'counts') setWall(true);
         if (save) {
           window.localStorage.setItem(LS_HUB, check.url);
-          window.localStorage.setItem(LS_TOKEN, token.trim());
+          window.localStorage.setItem(LS_TOKEN, cleanToken);
         }
       } catch (err) {
         setConnectError(connectErrorMessage(err));
@@ -161,7 +166,7 @@ export function App(): ReactNode {
     }
     const hub = window.localStorage.getItem(LS_HUB);
     const token = window.localStorage.getItem(LS_TOKEN);
-    if (hub && token) void connect(hub, token, false);
+    if (hub && token !== null) void connect(hub, token, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
