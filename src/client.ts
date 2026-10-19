@@ -14,10 +14,13 @@ import type {
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /** 'not-api': the hub answered, but not with board data. */
+  reason?: 'not-api';
+  constructor(status: number, message: string, reason?: 'not-api') {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.reason = reason;
   }
 }
 
@@ -60,7 +63,11 @@ export class HubClient implements BoardClient {
     if (!res.ok) {
       throw new ApiError(res.status, `The hub answered with an error (status ${res.status}).`);
     }
-    return (await res.json()) as Snapshot;
+    try {
+      return (await res.json()) as Snapshot;
+    } catch {
+      throw new ApiError(res.status, 'The hub answered, but not with board data.', 'not-api');
+    }
   }
 
   openStream(fromRev: number, handlers: StreamHandlers): StreamHandle {
