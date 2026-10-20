@@ -64,7 +64,24 @@ export class HubClient implements BoardClient {
       throw new ApiError(res.status, `The hub answered with an error (status ${res.status}).`);
     }
     try {
-      return (await res.json()) as Snapshot;
+      const snapshot: unknown = await res.json();
+      // Check the board envelope so unrelated JSON is not mistaken for a
+      // network failure when the app tries to read its collections.
+      if (
+        typeof snapshot !== 'object' || snapshot === null ||
+        !('rev' in snapshot) || typeof snapshot.rev !== 'number' ||
+        !('team' in snapshot) || typeof snapshot.team !== 'string' ||
+        !('view' in snapshot) || (snapshot.view !== 'full' && snapshot.view !== 'counts') ||
+        !('generated_at' in snapshot) || typeof snapshot.generated_at !== 'string' ||
+        !('lead_agent' in snapshot) ||
+        !('people' in snapshot) || !Array.isArray(snapshot.people) ||
+        !('agents' in snapshot) || !Array.isArray(snapshot.agents) ||
+        !('needs_attention' in snapshot) || !Array.isArray(snapshot.needs_attention) ||
+        !('feed' in snapshot) || !Array.isArray(snapshot.feed)
+      ) {
+        throw new Error('Not a board snapshot');
+      }
+      return snapshot as Snapshot;
     } catch {
       throw new ApiError(res.status, 'The hub answered, but not with board data.', 'not-api');
     }

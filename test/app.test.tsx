@@ -248,15 +248,42 @@ describe('saved hub reset rules', () => {
     expect(screen.getByLabelText('Hub address')).toHaveValue('https://hub.lectrical.dev');
   });
 
-  it('a saved hub that rejects the token keeps the saved address', async () => {
+  it.each([401, 403])('a saved hub that rejects the token with %i keeps the saved address', async (status) => {
     window.localStorage.setItem('billboard.hub', 'https://old-hub.example.net');
     window.localStorage.setItem('billboard.token', TOKEN);
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: false, status: 403, json: () => Promise.resolve({}) } as unknown as Response);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status }));
     render(<App />);
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent("This token can't read a team.");
     expect(alert).not.toHaveTextContent('saved hub address');
     expect(screen.getByLabelText('Hub address')).toHaveValue('https://old-hub.example.net');
+  });
+
+  it.each(['saved', 'typed'])('unrelated JSON from a %s hub is a not-API failure', async (source) => {
+    const address = 'https://wrong.example.net';
+    if (source === 'saved') {
+      window.localStorage.setItem('billboard.hub', address);
+      window.localStorage.setItem('billboard.token', TOKEN);
+    }
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({}));
+    render(<App />);
+    if (source === 'typed') {
+      const user = userEvent.setup();
+      const hub = await screen.findByLabelText('Hub address');
+      await user.clear(hub);
+      await user.type(hub, address);
+      await user.type(screen.getByLabelText('Paste your Lectrical token'), TOKEN);
+      await user.click(screen.getByRole('button', { name: 'Connect' }));
+    }
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(`The hub at ${address} answered, but not with the Billboard API.`);
+    expect(screen.getByLabelText('Hub address')).toHaveValue(
+      source === 'saved' ? 'https://hub.lectrical.dev' : address,
+    );
+    if (source === 'saved') {
+      expect(alert).toHaveTextContent(`The saved hub address ${address} failed.`);
+    }
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
   it('a saved hub that is reached but blocked by CORS keeps the saved address', async () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { HubClient } from '../src/client';
+import { buildDemoSnapshot, FREEZE_BASE } from '../src/demo';
 import type { StreamHandlers } from '../src/types';
 
 const TOKEN = 'lck_test_token_0000000000000000'; // fake token, tests only
@@ -44,7 +45,7 @@ async function flush(times = 30): Promise<void> {
 
 describe('HubClient', () => {
   it('sends the token only in the Authorization header, never in the URL', async () => {
-    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ rev: 1 }));
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse(buildDemoSnapshot(FREEZE_BASE)));
     const client = new HubClient('https://hub.example.com', TOKEN, { fetchFn });
     await client.getSnapshot();
     expect(fetchFn).toHaveBeenCalledTimes(1);
@@ -62,6 +63,21 @@ describe('HubClient', () => {
     await expect(client.getSnapshot()).rejects.toThrow("This token can't read a team.");
   });
 
+  it.each([null, {}, [], { rev: 1 }, { ...buildDemoSnapshot(FREEZE_BASE), needs_attention: null }])(
+    'classifies a non-board JSON response as not-API: %j',
+    async (body) => {
+      const fetchFn = vi.fn().mockResolvedValue(Response.json(body));
+      const client = new HubClient('https://hub.example.com', TOKEN, { fetchFn });
+      await expect(client.getSnapshot()).rejects.toMatchObject({ status: 200, reason: 'not-api' });
+    },
+  );
+
+  it('classifies an HTML response as not-API', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response('<html>Wrong site</html>'));
+    const client = new HubClient('https://hub.example.com', TOKEN, { fetchFn });
+    await expect(client.getSnapshot()).rejects.toMatchObject({ status: 200, reason: 'not-api' });
+  });
+
   it('sends Last-Event-ID with the last seen id when reconnecting', async () => {
     const seenLastEventIds: string[] = [];
     const fetchFn = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -75,7 +91,7 @@ describe('HubClient', () => {
         }
         return neverResponse(); // second stream stays open
       }
-      return Promise.resolve(jsonResponse({ rev: 1 }));
+      return Promise.resolve(jsonResponse(buildDemoSnapshot(FREEZE_BASE)));
     });
     const statuses: string[] = [];
     const client = new HubClient('https://hub.example.com', TOKEN, {
@@ -92,7 +108,7 @@ describe('HubClient', () => {
   });
 
   it('on a reset event refetches the snapshot and reopens from its rev', async () => {
-    const snapshot = { rev: 42494, team: 'acme', agents: [], needs_attention: [], feed: [] };
+    const snapshot = { ...buildDemoSnapshot(FREEZE_BASE), rev: 42494 };
     const calls: { url: string; lastEventId?: string }[] = [];
     let streamCount = 0;
     const fetchFn = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {

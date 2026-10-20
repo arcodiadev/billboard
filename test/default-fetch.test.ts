@@ -1,10 +1,11 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { HubClient } from '../src/client';
+import { buildDemoSnapshot, FREEZE_BASE } from '../src/demo';
 
 afterEach(() => vi.unstubAllGlobals());
 
 it('calls the default fetch without binding it to HubClient', async () => {
-  const snapshot = { rev: 1 };
+  const snapshot = buildDemoSnapshot(FREEZE_BASE);
   const fetchFn = vi.fn(function (this: unknown) {
     if (this !== undefined && this !== globalThis) {
       throw new TypeError('Illegal invocation');
