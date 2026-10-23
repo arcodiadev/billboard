@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { App } from '../src/App';
 import { DotsMenu } from '../src/components/DotsMenu';
+import { buildDemoSnapshot, FREEZE_BASE } from '../src/demo';
 
 describe('DotsMenu', () => {
   it('is keyboard reachable and closes on Escape', async () => {
@@ -308,6 +309,50 @@ describe('saved hub reset rules', () => {
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).not.toContain('now shows');
     expect(alert).toHaveTextContent('The saved hub failed. Could not reach the hub at https://hub.lectrical.dev.');
+    expect(screen.getByLabelText('Hub address')).toHaveValue('https://hub.lectrical.dev');
+  });
+
+  it('a late saved-hub failure keeps a hub and token typed while it was pending', async () => {
+    window.localStorage.setItem('billboard.hub', 'https://old-hub.example.net');
+    window.localStorage.setItem('billboard.token', TOKEN);
+    let rejectSnapshot!: (error: Error) => void;
+    const pending = new Promise<Response>((_resolve, reject) => {
+      rejectSnapshot = reject;
+    });
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) =>
+      isProbe(input) ? Promise.reject(new TypeError('Failed to fetch')) : pending,
+    );
+    render(<App />);
+    const user = userEvent.setup();
+    const hub = screen.getByLabelText('Hub address');
+    await user.clear(hub);
+    await user.type(hub, 'https://typed.example.net');
+    await user.type(screen.getByLabelText('Paste your Lectrical token'), 'lck_test_new');
+    await act(async () => {
+      rejectSnapshot(new TypeError('Failed to fetch'));
+    });
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('The saved hub address https://old-hub.example.net failed.');
+    expect(alert).not.toHaveTextContent('now shows');
+    expect(screen.getByLabelText('Hub address')).toHaveValue('https://typed.example.net');
+    expect(screen.getByLabelText('Paste your Lectrical token')).toHaveValue('lck_test_new');
+  });
+
+  it('after Disconnect and forget token the hub box shows the default again', async () => {
+    window.localStorage.setItem('billboard.hub', 'https://old-hub.example.net');
+    window.localStorage.setItem('billboard.token', TOKEN);
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) =>
+      String(input).endsWith('/api/board/snapshot')
+        ? Promise.resolve(Response.json(buildDemoSnapshot(FREEZE_BASE)))
+        : new Promise<Response>(() => {}),
+    );
+    render(<App />);
+    await screen.findByRole('heading', { name: 'Agents' });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Billboard menu' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Disconnect and forget token' }));
+    expect(window.localStorage.getItem('billboard.hub')).toBeNull();
+    expect(window.localStorage.getItem('billboard.token')).toBeNull();
     expect(screen.getByLabelText('Hub address')).toHaveValue('https://hub.lectrical.dev');
   });
 });

@@ -50,6 +50,7 @@ export function App(): ReactNode {
   const [connectError, setConnectError] = useState<string | null>(null);
   const [screenHub, setScreenHub] = useState(() => hubParam ?? window.localStorage.getItem(LS_HUB) ?? DEFAULT_HUB);
   const [hubKey, setHubKey] = useState(0);
+  const formEdited = useRef(false);
   const [now, setNow] = useState(() => Date.now());
   const streamRef = useRef<StreamHandle | null>(null);
   const initialFeedRevs = useRef<ReadonlySet<number>>(new Set());
@@ -125,7 +126,9 @@ export function App(): ReactNode {
     async (hubInput: string, token: string, opts: { save: boolean; fromSaved?: boolean }) => {
       // A saved hub whose address is wrong or unreachable goes back to the
       // default in the hub box, and the message says so. A reached hub (bad
-      // token, CORS refusal) keeps its address. A hub the user typed is left alone.
+      // token, CORS refusal) keeps its address. A hub the user typed is left
+      // alone, and so is anything typed while the saved attempt was pending.
+      if (opts.fromSaved) formEdited.current = false;
       const showFailure = (failure: ConnectFailure, hubTried: string): void => {
         if (!opts.fromSaved || !failure.resetHub) {
           setConnectError(failure.message);
@@ -133,6 +136,8 @@ export function App(): ReactNode {
         }
         if (hubTried === DEFAULT_HUB) {
           setConnectError(`The saved hub failed. ${failure.message}`);
+        } else if (formEdited.current) {
+          setConnectError(`The saved hub address ${hubTried} failed. ${failure.message}`);
         } else {
           setConnectError(`The saved hub address ${hubTried} failed. ${failure.message} The hub box now shows ${DEFAULT_HUB}.`);
           setScreenHub(DEFAULT_HUB);
@@ -219,6 +224,7 @@ export function App(): ReactNode {
     streamRef.current = null;
     window.localStorage.removeItem(LS_HUB);
     window.localStorage.removeItem(LS_TOKEN);
+    setScreenHub(hubParam ?? DEFAULT_HUB);
     setBoard(null);
     setConnectError(null);
     toggleWall(false);
@@ -259,6 +265,9 @@ export function App(): ReactNode {
               busy={busy}
               error={connectError}
               onConnect={(hub, token) => void connect(hub, token, { save: true })}
+              onEdit={() => {
+                formEdited.current = true;
+              }}
               onDemo={() => void startDemo()}
             />
           ) : (

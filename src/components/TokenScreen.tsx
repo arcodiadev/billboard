@@ -9,12 +9,23 @@ interface TokenScreenProps {
   busy: boolean;
   error: string | null;
   onConnect(hub: string, token: string): void;
+  onEdit?(): void;
   onDemo(): void;
 }
 
-export function TokenScreen({ initialHub, busy, error, onConnect, onDemo }: TokenScreenProps): ReactNode {
-  const [hub, setHub] = useState(initialHub);
-  const [token, setToken] = useState('');
+export function TokenScreen({ initialHub, busy, error, onConnect, onEdit, onDemo }: TokenScreenProps): ReactNode {
+  const [hub, setHubState] = useState(initialHub);
+  const [token, setTokenState] = useState('');
+
+  function setHub(value: string): void {
+    setHubState(value);
+    onEdit?.();
+  }
+
+  function setToken(value: string): void {
+    setTokenState(value);
+    onEdit?.();
+  }
 
   function submit(e: React.FormEvent): void {
     e.preventDefault();
