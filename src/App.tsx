@@ -51,6 +51,12 @@ export function App(): ReactNode {
   const [screenHub, setScreenHub] = useState(() => hubParam ?? window.localStorage.getItem(LS_HUB) ?? DEFAULT_HUB);
   const [hubKey, setHubKey] = useState(0);
   const formEdited = useRef(false);
+  const [hasSaved, setHasSaved] = useState(
+    () => window.localStorage.getItem(LS_HUB) !== null || window.localStorage.getItem(LS_TOKEN) !== null,
+  );
+  // Bumped by each connect and by Forget; a connect whose number is stale
+  // drops its result instead of opening the board or saving credentials.
+  const attemptRef = useRef(0);
   const [now, setNow] = useState(() => Date.now());
   const streamRef = useRef<StreamHandle | null>(null);
   const initialFeedRevs = useRef<ReadonlySet<number>>(new Set());
@@ -106,8 +112,9 @@ export function App(): ReactNode {
   }, []);
 
   const startWith = useCallback(
-    async (client: BoardClient, demo: boolean) => {
+    async (client: BoardClient, demo: boolean, current: () => boolean = () => true) => {
       const snapshot = await client.getSnapshot();
+      if (!current()) return null;
       const fixed: Snapshot = { ...snapshot, needs_attention: sortNeedsAttention(snapshot.needs_attention) };
       setBoard({ snapshot: fixed, status: 'live', lastUpdate: Date.now(), demo });
       attachStream(client, fixed);
@@ -158,22 +165,27 @@ export function App(): ReactNode {
         setConnectError("That token has characters a header can't carry.");
         return;
       }
+      const attempt = ++attemptRef.current;
+      const current = (): boolean => attempt === attemptRef.current;
       setBusy(true);
       setConnectError(null);
       try {
         const client = new HubClient(check.url, cleanToken);
         streamRef.current?.close();
-        const snapshot = await startWith(client, false);
+        const snapshot = await startWith(client, false, current);
+        if (!snapshot) return;
         if (snapshot.view === 'counts') setWall(true);
         if (opts.save) {
           window.localStorage.setItem(LS_HUB, check.url);
           window.localStorage.setItem(LS_TOKEN, cleanToken);
+          setHasSaved(true);
         }
       } catch (err) {
+        if (!current()) return;
         const failure = await describeConnectError(err, check.url, window.location.origin, defaultProbe);
-        showFailure(failure, check.url);
+        if (current()) showFailure(failure, check.url);
       } finally {
-        setBusy(false);
+        if (current()) setBusy(false);
       }
     },
     [startWith],
@@ -220,8 +232,11 @@ export function App(): ReactNode {
   }
 
   function forgetSaved(): void {
+    attemptRef.current += 1;
     window.localStorage.removeItem(LS_HUB);
     window.localStorage.removeItem(LS_TOKEN);
+    setHasSaved(false);
+    setBusy(false);
     setConnectError(null);
   }
 
@@ -230,6 +245,7 @@ export function App(): ReactNode {
     streamRef.current = null;
     window.localStorage.removeItem(LS_HUB);
     window.localStorage.removeItem(LS_TOKEN);
+    setHasSaved(false);
     setScreenHub(hubParam ?? DEFAULT_HUB);
     setBoard(null);
     setConnectError(null);
@@ -237,7 +253,6 @@ export function App(): ReactNode {
   }
 
   const connected = board !== null;
-  const hasSaved = window.localStorage.getItem(LS_HUB) !== null || window.localStorage.getItem(LS_TOKEN) !== null;
   const wallActive = wall && connected;
   const displayNow = freeze && connected && board.demo ? Date.parse(board.snapshot.generated_at) : now;
 

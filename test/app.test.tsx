@@ -385,4 +385,67 @@ describe('forget saved hub and token', () => {
     expect(window.localStorage.getItem('billboard.token')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Forget saved hub and token' })).not.toBeInTheDocument();
   });
+
+  it('hides as soon as it is clicked, with no error shown and no clock tick', async () => {
+    window.history.replaceState(null, '', '/?freeze=1');
+    window.localStorage.setItem('billboard.hub', 'https://old-hub.example.net');
+    render(<App />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Forget saved hub and token' }));
+    expect(window.localStorage.getItem('billboard.hub')).toBeNull();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Forget saved hub and token' })).not.toBeInTheDocument();
+  });
+
+  it('a connect pending at Forget cannot save credentials back or open the board', async () => {
+    window.localStorage.setItem('billboard.hub', 'https://old-hub.example.net');
+    window.localStorage.setItem('billboard.token', 'lck_test_old');
+    let resolveSnapshot!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      resolveSnapshot = resolve;
+    });
+    let snapshots = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      if (!String(input).endsWith('/api/board/snapshot')) return new Promise<Response>(() => {});
+      snapshots += 1;
+      return snapshots === 1 ? Promise.resolve(new Response(null, { status: 403 })) : pending;
+    });
+    render(<App />);
+    await screen.findByRole('alert');
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('Paste your Lectrical token'), 'lck_test_new');
+    await user.click(screen.getByRole('button', { name: 'Connect' }));
+    expect(screen.getByRole('button', { name: 'Connecting…' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Forget saved hub and token' }));
+    expect(screen.getByRole('button', { name: 'Connect' })).toBeEnabled();
+    await act(async () => {
+      resolveSnapshot(Response.json(buildDemoSnapshot(FREEZE_BASE)));
+    });
+    expect(window.localStorage.getItem('billboard.hub')).toBeNull();
+    expect(window.localStorage.getItem('billboard.token')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Agents' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Connect Billboard to Lectrical' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Forget saved hub and token' })).not.toBeInTheDocument();
+  });
+
+  it('a saved connect pending at Forget does not report its later failure', async () => {
+    window.localStorage.setItem('billboard.hub', 'https://old-hub.example.net');
+    window.localStorage.setItem('billboard.token', 'lck_test_old');
+    let rejectSnapshot!: (error: Error) => void;
+    const pending = new Promise<Response>((_resolve, reject) => {
+      rejectSnapshot = reject;
+    });
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) =>
+      String(input).endsWith('/health') ? Promise.reject(new TypeError('Failed to fetch')) : pending,
+    );
+    render(<App />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Forget saved hub and token' }));
+    await act(async () => {
+      rejectSnapshot(new TypeError('Failed to fetch'));
+    });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(window.localStorage.getItem('billboard.hub')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Connect' })).toBeEnabled();
+  });
 });
