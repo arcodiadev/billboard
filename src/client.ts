@@ -14,10 +14,13 @@ import type {
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /** 'not-api': the hub answered, but not with board data. */
+  reason?: 'not-api';
+  constructor(status: number, message: string, reason?: 'not-api') {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.reason = reason;
   }
 }
 
@@ -60,7 +63,28 @@ export class HubClient implements BoardClient {
     if (!res.ok) {
       throw new ApiError(res.status, `The hub answered with an error (status ${res.status}).`);
     }
-    return (await res.json()) as Snapshot;
+    try {
+      const snapshot: unknown = await res.json();
+      // Check the board envelope so unrelated JSON is not mistaken for a
+      // network failure when the app tries to read its collections.
+      if (
+        typeof snapshot !== 'object' || snapshot === null ||
+        !('rev' in snapshot) || typeof snapshot.rev !== 'number' ||
+        !('team' in snapshot) || typeof snapshot.team !== 'string' ||
+        !('view' in snapshot) || (snapshot.view !== 'full' && snapshot.view !== 'counts') ||
+        !('generated_at' in snapshot) || typeof snapshot.generated_at !== 'string' ||
+        !('lead_agent' in snapshot) ||
+        !('people' in snapshot) || !Array.isArray(snapshot.people) ||
+        !('agents' in snapshot) || !Array.isArray(snapshot.agents) ||
+        !('needs_attention' in snapshot) || !Array.isArray(snapshot.needs_attention) ||
+        !('feed' in snapshot) || !Array.isArray(snapshot.feed)
+      ) {
+        throw new Error('Not a board snapshot');
+      }
+      return snapshot as Snapshot;
+    } catch {
+      throw new ApiError(res.status, 'The hub answered, but not with board data.', 'not-api');
+    }
   }
 
   openStream(fromRev: number, handlers: StreamHandlers): StreamHandle {

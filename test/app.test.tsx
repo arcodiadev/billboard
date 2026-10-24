@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { App } from '../src/App';
 import { DotsMenu } from '../src/components/DotsMenu';
+import { buildDemoSnapshot, FREEZE_BASE } from '../src/demo';
 
 describe('DotsMenu', () => {
   it('is keyboard reachable and closes on Escape', async () => {
@@ -135,5 +136,223 @@ describe('agent row menu', () => {
     expect(screen.getByRole('menuitem', { name: 'Disconnect and forget token' })).toBeInTheDocument();
     await user.click(screen.getByRole('menuitem', { name: 'Disconnect and forget token' }));
     expect(await screen.findByRole('heading', { name: 'Connect Billboard to Lectrical' })).toBeInTheDocument();
+  });
+});
+
+describe('connect errors and saved hub', () => {
+  const TOKEN = 'lck_test_123';
+  beforeEach(() => {
+    window.history.replaceState(null, '', '/');
+    window.localStorage.clear();
+  });
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  function isProbe(input: unknown): boolean {
+    return String(input).endsWith('/health');
+  }
+
+  it('names the hub and says it is unreachable when the network and the probe both fail', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'));
+    render(<App />);
+    await screen.findByRole('heading', { name: 'Connect Billboard to Lectrical' });
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('Paste your Lectrical token'), TOKEN);
+    await user.click(screen.getByRole('button', { name: 'Connect' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Could not reach the hub at https://hub.lectrical.dev.');
+    expect(alert).not.toHaveTextContent(TOKEN);
+  });
+
+  it('gives a probable CORS message, naming the page origin, when the hub answers the probe', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      if (isProbe(input)) return Promise.resolve({ type: 'opaque' } as unknown as Response);
+      return Promise.reject(new TypeError('Failed to fetch'));
+    });
+    render(<App />);
+    await screen.findByRole('heading', { name: 'Connect Billboard to Lectrical' });
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('Paste your Lectrical token'), TOKEN);
+    await user.click(screen.getByRole('button', { name: 'Connect' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('probably a CORS refusal');
+    expect(alert).toHaveTextContent("browser.origins setting");
+    expect(alert).toHaveTextContent('Hub tried: https://hub.lectrical.dev.');
+  });
+
+  it('gives a wrong-address message when the hub answers 404 on the board API', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: false,
+      status: 404,
+      json: () => Promise.resolve({}),
+    } as unknown as Response);
+    render(<App />);
+    await screen.findByRole('heading', { name: 'Connect Billboard to Lectrical' });
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('Paste your Lectrical token'), TOKEN);
+    await user.click(screen.getByRole('button', { name: 'Connect' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'answered, but not with the Billboard API. Check the hub address.',
+    );
+  });
+
+  it('a saved hub that fails resets the hub box to the default and says so', async () => {
+    window.localStorage.setItem('billboard.hub', 'https://old-hub.example.net');
+    window.localStorage.setItem('billboard.token', TOKEN);
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'));
+    render(<App />);
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('The saved hub address https://old-hub.example.net failed.');
+    expect(alert).toHaveTextContent('The hub box now shows https://hub.lectrical.dev.');
+    expect(screen.getByLabelText('Hub address')).toHaveValue('https://hub.lectrical.dev');
+  });
+
+  it('a hub the user typed is not reset when it fails', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'));
+    render(<App />);
+    await screen.findByRole('heading', { name: 'Connect Billboard to Lectrical' });
+    const user = userEvent.setup();
+    const hub = screen.getByLabelText('Hub address');
+    await user.clear(hub);
+    await user.type(hub, 'https://typed.example.net');
+    await user.type(screen.getByLabelText('Paste your Lectrical token'), TOKEN);
+    await user.click(screen.getByRole('button', { name: 'Connect' }));
+    await screen.findByRole('alert');
+    expect(screen.getByLabelText('Hub address')).toHaveValue('https://typed.example.net');
+  });
+});
+
+describe('saved hub reset rules', () => {
+  const TOKEN = 'lck_test_123';
+  beforeEach(() => {
+    window.history.replaceState(null, '', '/');
+    window.localStorage.clear();
+  });
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  function isProbe(input: unknown): boolean {
+    return String(input).endsWith('/health');
+  }
+
+  it('a saved hub that answers 404 resets the box and names the saved address', async () => {
+    window.localStorage.setItem('billboard.hub', 'https://old-hub.example.net');
+    window.localStorage.setItem('billboard.token', TOKEN);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: false, status: 404, json: () => Promise.resolve({}) } as unknown as Response);
+    render(<App />);
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('The saved hub address https://old-hub.example.net failed.');
+    expect(screen.getByLabelText('Hub address')).toHaveValue('https://hub.lectrical.dev');
+  });
+
+  it.each([401, 403])('a saved hub that rejects the token with %i keeps the saved address', async (status) => {
+    window.localStorage.setItem('billboard.hub', 'https://old-hub.example.net');
+    window.localStorage.setItem('billboard.token', TOKEN);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status }));
+    render(<App />);
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent("This token can't read a team.");
+    expect(alert).not.toHaveTextContent('saved hub address');
+    expect(screen.getByLabelText('Hub address')).toHaveValue('https://old-hub.example.net');
+  });
+
+  it.each(['saved', 'typed'])('unrelated JSON from a %s hub is a not-API failure', async (source) => {
+    const address = 'https://wrong.example.net';
+    if (source === 'saved') {
+      window.localStorage.setItem('billboard.hub', address);
+      window.localStorage.setItem('billboard.token', TOKEN);
+    }
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({}));
+    render(<App />);
+    if (source === 'typed') {
+      const user = userEvent.setup();
+      const hub = await screen.findByLabelText('Hub address');
+      await user.clear(hub);
+      await user.type(hub, address);
+      await user.type(screen.getByLabelText('Paste your Lectrical token'), TOKEN);
+      await user.click(screen.getByRole('button', { name: 'Connect' }));
+    }
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(`The hub at ${address} answered, but not with the Billboard API.`);
+    expect(screen.getByLabelText('Hub address')).toHaveValue(
+      source === 'saved' ? 'https://hub.lectrical.dev' : address,
+    );
+    if (source === 'saved') {
+      expect(alert).toHaveTextContent(`The saved hub address ${address} failed.`);
+    }
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('a saved hub that is reached but blocked by CORS keeps the saved address', async () => {
+    window.localStorage.setItem('billboard.hub', 'https://old-hub.example.net');
+    window.localStorage.setItem('billboard.token', TOKEN);
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      if (isProbe(input)) return Promise.resolve({ type: 'opaque' } as unknown as Response);
+      return Promise.reject(new TypeError('Failed to fetch'));
+    });
+    render(<App />);
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('probably a CORS refusal');
+    expect(alert).not.toHaveTextContent('saved hub address');
+    expect(screen.getByLabelText('Hub address')).toHaveValue('https://old-hub.example.net');
+  });
+
+  it('when the saved hub is the default, the message does not name it twice', async () => {
+    window.localStorage.setItem('billboard.hub', 'https://hub.lectrical.dev');
+    window.localStorage.setItem('billboard.token', TOKEN);
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'));
+    render(<App />);
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).not.toContain('now shows');
+    expect(alert).toHaveTextContent('The saved hub failed. Could not reach the hub at https://hub.lectrical.dev.');
+    expect(screen.getByLabelText('Hub address')).toHaveValue('https://hub.lectrical.dev');
+  });
+
+  it('a late saved-hub failure keeps a hub and token typed while it was pending', async () => {
+    window.localStorage.setItem('billboard.hub', 'https://old-hub.example.net');
+    window.localStorage.setItem('billboard.token', TOKEN);
+    let rejectSnapshot!: (error: Error) => void;
+    const pending = new Promise<Response>((_resolve, reject) => {
+      rejectSnapshot = reject;
+    });
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) =>
+      isProbe(input) ? Promise.reject(new TypeError('Failed to fetch')) : pending,
+    );
+    render(<App />);
+    const user = userEvent.setup();
+    const hub = screen.getByLabelText('Hub address');
+    await user.clear(hub);
+    await user.type(hub, 'https://typed.example.net');
+    await user.type(screen.getByLabelText('Paste your Lectrical token'), 'lck_test_new');
+    await act(async () => {
+      rejectSnapshot(new TypeError('Failed to fetch'));
+    });
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('The saved hub address https://old-hub.example.net failed.');
+    expect(alert).not.toHaveTextContent('now shows');
+    expect(screen.getByLabelText('Hub address')).toHaveValue('https://typed.example.net');
+    expect(screen.getByLabelText('Paste your Lectrical token')).toHaveValue('lck_test_new');
+  });
+
+  it('after Disconnect and forget token the hub box shows the default again', async () => {
+    window.localStorage.setItem('billboard.hub', 'https://old-hub.example.net');
+    window.localStorage.setItem('billboard.token', TOKEN);
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) =>
+      String(input).endsWith('/api/board/snapshot')
+        ? Promise.resolve(Response.json(buildDemoSnapshot(FREEZE_BASE)))
+        : new Promise<Response>(() => {}),
+    );
+    render(<App />);
+    await screen.findByRole('heading', { name: 'Agents' });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Billboard menu' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Disconnect and forget token' }));
+    expect(window.localStorage.getItem('billboard.hub')).toBeNull();
+    expect(window.localStorage.getItem('billboard.token')).toBeNull();
+    expect(screen.getByLabelText('Hub address')).toHaveValue('https://hub.lectrical.dev');
   });
 });

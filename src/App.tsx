@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { BoardClient, ConnectionStatus, Snapshot, StreamHandle } from './types';
-import { HubClient, ApiError } from './client';
+import { HubClient } from './client';
 import { DemoClient } from './demo';
 import { validateHubUrl } from './hubUrl';
+import { defaultProbe, describeConnectError } from './connectErrors';
+import type { ConnectFailure } from './connectErrors';
 import { sortNeedsAttention } from './grouping';
 import { TopBar } from './components/TopBar';
 import { TokenScreen, DEFAULT_HUB } from './components/TokenScreen';
@@ -37,11 +39,6 @@ async function copyText(text: string): Promise<void> {
   ta.remove();
 }
 
-function connectErrorMessage(err: unknown): string {
-  if (err instanceof ApiError) return err.message;
-  return "The hub didn't allow this page, or it can't be reached. Add this address to your team's browser.origins setting, or run Billboard on localhost.";
-}
-
 export function App(): ReactNode {
   const [params] = useState(() => new URLSearchParams(window.location.search));
   const freeze = params.get('freeze') === '1';
@@ -51,6 +48,9 @@ export function App(): ReactNode {
   const [wall, setWall] = useState(params.get('wall') === '1');
   const [busy, setBusy] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
+  const [screenHub, setScreenHub] = useState(() => hubParam ?? window.localStorage.getItem(LS_HUB) ?? DEFAULT_HUB);
+  const [hubKey, setHubKey] = useState(0);
+  const formEdited = useRef(false);
   const [now, setNow] = useState(() => Date.now());
   const streamRef = useRef<StreamHandle | null>(null);
   const initialFeedRevs = useRef<ReadonlySet<number>>(new Set());
@@ -123,10 +123,30 @@ export function App(): ReactNode {
   }, [freeze, startWith]);
 
   const connect = useCallback(
-    async (hubInput: string, token: string, save: boolean) => {
+    async (hubInput: string, token: string, opts: { save: boolean; fromSaved?: boolean }) => {
+      // A saved hub whose address is wrong or unreachable goes back to the
+      // default in the hub box, and the message says so. A reached hub (bad
+      // token, CORS refusal) keeps its address. A hub the user typed is left
+      // alone, and so is anything typed while the saved attempt was pending.
+      if (opts.fromSaved) formEdited.current = false;
+      const showFailure = (failure: ConnectFailure, hubTried: string): void => {
+        if (!opts.fromSaved || !failure.resetHub) {
+          setConnectError(failure.message);
+          return;
+        }
+        if (hubTried === DEFAULT_HUB) {
+          setConnectError(`The saved hub failed. ${failure.message}`);
+        } else if (formEdited.current) {
+          setConnectError(`The saved hub address ${hubTried} failed. ${failure.message}`);
+        } else {
+          setConnectError(`The saved hub address ${hubTried} failed. ${failure.message} The hub box now shows ${DEFAULT_HUB}.`);
+          setScreenHub(DEFAULT_HUB);
+          setHubKey((k) => k + 1);
+        }
+      };
       const check = validateHubUrl(hubInput);
       if (!check.ok) {
-        setConnectError(check.error);
+        showFailure({ message: check.error, resetHub: true }, hubInput.trim());
         return;
       }
       const cleanToken = token.replace(/\s/g, '');
@@ -145,12 +165,13 @@ export function App(): ReactNode {
         streamRef.current?.close();
         const snapshot = await startWith(client, false);
         if (snapshot.view === 'counts') setWall(true);
-        if (save) {
+        if (opts.save) {
           window.localStorage.setItem(LS_HUB, check.url);
           window.localStorage.setItem(LS_TOKEN, cleanToken);
         }
       } catch (err) {
-        setConnectError(connectErrorMessage(err));
+        const failure = await describeConnectError(err, check.url, window.location.origin, defaultProbe);
+        showFailure(failure, check.url);
       } finally {
         setBusy(false);
       }
@@ -166,7 +187,7 @@ export function App(): ReactNode {
     }
     const hub = window.localStorage.getItem(LS_HUB);
     const token = window.localStorage.getItem(LS_TOKEN);
-    if (hub && token !== null) void connect(hub, token, false);
+    if (hub && token !== null) void connect(hub, token, { save: false, fromSaved: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -203,6 +224,7 @@ export function App(): ReactNode {
     streamRef.current = null;
     window.localStorage.removeItem(LS_HUB);
     window.localStorage.removeItem(LS_TOKEN);
+    setScreenHub(hubParam ?? DEFAULT_HUB);
     setBoard(null);
     setConnectError(null);
     toggleWall(false);
@@ -238,10 +260,14 @@ export function App(): ReactNode {
         <main className="wrap" id="personal">
           {!connected ? (
             <TokenScreen
-              initialHub={hubParam ?? window.localStorage.getItem(LS_HUB) ?? DEFAULT_HUB}
+              key={hubKey}
+              initialHub={screenHub}
               busy={busy}
               error={connectError}
-              onConnect={(hub, token) => void connect(hub, token, true)}
+              onConnect={(hub, token) => void connect(hub, token, { save: true })}
+              onEdit={() => {
+                formEdited.current = true;
+              }}
               onDemo={() => void startDemo()}
             />
           ) : (
